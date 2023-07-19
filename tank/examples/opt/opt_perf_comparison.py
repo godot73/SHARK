@@ -11,7 +11,7 @@ from shark_opt_wrapper import OPTForCausalLMModel
 MODEL_NAME = "facebook/opt-1.3b"
 OPT_MODELNAME = "opt-1.3b"
 OPT_FS_NAME = "opt_1-3b"
-MAX_SEQUENCE_LENGTH = 512
+MAX_SEQUENCE_LENGTH = 128
 DEVICE = "cpu"
 
 PROMPTS = [
