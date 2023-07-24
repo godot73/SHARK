@@ -8,10 +8,13 @@ from shark.shark_importer import import_with_fx
 from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
-MODEL_NAME = "facebook/opt-1.3b"
-OPT_MODELNAME = "opt-1.3b"
-OPT_FS_NAME = "opt_1-3b"
-MAX_SEQUENCE_LENGTH = 128
+#MODEL_NAME = "facebook/opt-1.3b"
+MODEL_NAME = "facebook/opt-350m"
+#OPT_MODELNAME = "opt-1.3b"
+OPT_MODELNAME = "opt-350m"
+#OPT_FS_NAME = "opt_1-3b"
+OPT_FS_NAME = "opt_350m"
+MAX_SEQUENCE_LENGTH = 32
 DEVICE = "cpu"
 
 PROMPTS = [
