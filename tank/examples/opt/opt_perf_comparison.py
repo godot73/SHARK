@@ -10,7 +10,6 @@ from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
 MODEL_NAME = "facebook/opt-1.3b"
-OPT_FS_NAME = "opt_1-3b"
 MAX_SEQUENCE_LENGTH = 512
 DEVICE = "cpu"
 
@@ -48,7 +47,8 @@ def create_vmfb_module(model_name, tokenizer, device):
     # np.save("model_inputs_0.npy", inputs[0])
     # np.save("model_inputs_1.npy", inputs[1])
 
-    mlir_path = f"./{OPT_FS_NAME}_causallm_{MAX_SEQUENCE_LENGTH}_torch.mlir"
+    opt_fs_name = get_opt_fs_name(model_name)
+    mlir_path = f"./{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch.mlir"
     if os.path.isfile(mlir_path):
         with open(mlir_path, "r") as f:
             model_mlir = f.read()
@@ -58,7 +58,7 @@ def create_vmfb_module(model_name, tokenizer, device):
             model=opt_model,
             inputs=inputs,
             is_f16=False,
-            model_name=OPT_FS_NAME,
+            model_name=opt_fs_name,
             return_str=True,
         )
         with open(mlir_path, "w") as f:
@@ -72,14 +72,15 @@ def create_vmfb_module(model_name, tokenizer, device):
         is_benchmark=False,
     )
 
-    vmfb_name = f"{OPT_FS_NAME}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels"
+    vmfb_name = f"{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels"
     shark_module.save_module(module_name=vmfb_name)
     vmfb_path = vmfb_name + ".vmfb"
     return vmfb_path
 
 
-def load_shark_model() -> ModelWrapper:
-    vmfb_name = f"{OPT_FS_NAME}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels.vmfb"
+def load_shark_model(model_name) -> ModelWrapper:
+    opt_fs_name = get_opt_fs_name(model_name)
+    vmfb_name = f"{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels.vmfb"
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
     if not os.path.isfile(vmfb_name):
         print(f"vmfb not found. compiling and saving to {vmfb_name}")
@@ -94,16 +95,6 @@ def run_shark_model(model_wrapper: ModelWrapper, tokens):
     return model_wrapper.model("forward", tokens)
 
 
-def run_shark():
-    model_wrapper = load_shark_model()
-
-    prompt = "What is the meaning of life?"
-    logits = run_shark_model(model_wrapper, prompt)
-
-    # Print output logits to validate vs. pytorch + base transformers
-    print(logits[0])
-
-
 def load_huggingface_model() -> ModelWrapper:
     return ModelWrapper(
         model=OPTForCausalLM.from_pretrained(MODEL_NAME),
@@ -112,9 +103,9 @@ def load_huggingface_model() -> ModelWrapper:
 
 
 def run_huggingface_model(model_wrapper: ModelWrapper, tokens):
-    return model_wrapper.model.forward(
-        tokens.input_ids, tokens.attention_mask, return_dict=False
-    )
+    return model_wrapper.model.forward(tokens.input_ids,
+                                       tokens.attention_mask,
+                                       return_dict=False)
 
 
 def run_huggingface():
@@ -154,9 +145,9 @@ def collect_huggingface_logits():
     save_json(results, "/tmp/huggingface.json")
 
 
-def collect_shark_logits():
+def collect_shark_logits(model_name):
     t0 = time.time()
-    model_wrapper = load_shark_model()
+    model_wrapper = load_shark_model(model_name)
     print("--- Took {} seconds to load Shark.".format(time.time() - t0))
     results = []
     tokenized_prompts = []
@@ -183,6 +174,19 @@ def collect_shark_logits():
     save_json(results, "/tmp/shark.json")
 
 
+def get_opt_fs_name(model_name: str) -> str:
+    """Cleanses the model name ino a file system-friendly name.
+
+    Example: get_opt_fs_name('facebook/opt-1.3b') == 'opt_1-3b'
+    """
+    slash_split = model_name.split('/')
+    assert 1 <= len(slash_split) <= 2, 'There should be at most one slash.'
+    model_name = slash_split[-1]
+    for src_pattern, dest_pattern in (('-', '_'), ('.', '-')):
+        model_name = model_name.replace(src_pattern, dest_pattern)
+    return model_name
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--save-json',
@@ -204,5 +208,5 @@ def parse_args():
 
 if __name__ == "__main__":
     parse_args()
-    collect_shark_logits()
+    collect_shark_logits(MODEL_NAME)
     collect_huggingface_logits()
