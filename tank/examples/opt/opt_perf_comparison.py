@@ -2,6 +2,7 @@ import argparse
 import collections
 import json
 import time
+from typing import Tuple
 import os
 
 from shark.shark_inference import SharkInference
@@ -112,10 +113,11 @@ def save_json(data, filename):
 
 
 def collect_huggingface_logits(model_name: str, max_seq_len: int,
-                               save_json: bool):
+                               save_json: bool) -> Tuple[float, float]:
     t0 = time.time()
     model_wrapper = load_huggingface_model(model_name)
-    print("--- Took {} seconds to load Huggingface.".format(time.time() - t0))
+    load_time = time.time() - t0
+    print("--- Took {} seconds to load Huggingface.".format(load_time))
     results = []
     tokenized_prompts = []
     for prompt in PROMPTS:
@@ -133,15 +135,19 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
         logits = run_huggingface_model(model_wrapper, tokens)
         if save_json:
             results.append([PROMPTS[idx], logits[0].tolist()])
-    print("--- Took {} seconds to run Huggingface.".format(time.time() - t0))
+    run_time = time.time() - t0
+    print("--- Took {} seconds to run Huggingface.".format(run_time))
     if save_json:
         save_json(results, "/tmp/huggingface.json")
+    return (load_time, run_time)
 
 
-def collect_shark_logits(model_name: str, max_seq_len: int, save_json: bool):
+def collect_shark_logits(model_name: str, max_seq_len: int,
+                         save_json: bool) -> Tuple[float, float]:
     t0 = time.time()
     model_wrapper = load_shark_model(model_name, max_seq_len)
-    print("--- Took {} seconds to load Shark.".format(time.time() - t0))
+    load_time = time.time() - t0
+    print("--- Took {} seconds to load Shark.".format(load_time))
     results = []
     tokenized_prompts = []
     for prompt in PROMPTS:
@@ -164,9 +170,11 @@ def collect_shark_logits(model_name: str, max_seq_len: int, save_json: bool):
         lst = [e.tolist() for e in logits]
         if save_json:
             results.append([PROMPTS[idx], lst])
-    print("--- Took {} seconds to run Shark.".format(time.time() - t0))
+    run_time = time.time() - t0
+    print("--- Took {} seconds to run Shark.".format(run_time))
     if save_json:
         save_json(results, "/tmp/shark.json")
+    return (load_time, run_time)
 
 
 def get_opt_fs_name(model_name: str) -> str:
@@ -203,6 +211,12 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    collect_shark_logits(args.model_name, args.max_seq_len, args.save_json)
-    collect_huggingface_logits(args.model_name, args.max_seq_len,
-                               args.save_json)
+    shark_times = collect_shark_logits(args.model_name, args.max_seq_len,
+                                       args.save_json)
+    huggingface_times = collect_huggingface_logits(args.model_name,
+                                                   args.max_seq_len,
+                                                   args.save_json)
+    # shark_load_time,shark_run_time,huggingface_load_time,huggingface_run_time
+    all_times_csv = ','.join(
+        [str(e) for e in list(shark_times) + list(huggingface_times)])
+    print(f'# Summary: {all_times_csv}')
