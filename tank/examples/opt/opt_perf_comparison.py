@@ -1,3 +1,4 @@
+import argparse
 import collections
 import json
 import time
@@ -9,7 +10,6 @@ from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
 MODEL_NAME = "facebook/opt-1.3b"
-OPT_MODELNAME = "opt-1.3b"
 OPT_FS_NAME = "opt_1-3b"
 MAX_SEQUENCE_LENGTH = 512
 DEVICE = "cpu"
@@ -31,7 +31,7 @@ ModelWrapper = collections.namedtuple("ModelWrapper", ["model", "tokenizer"])
 
 
 def create_vmfb_module(model_name, tokenizer, device):
-    opt_base_model = OPTForCausalLM.from_pretrained("facebook/" + model_name)
+    opt_base_model = OPTForCausalLM.from_pretrained(model_name)
     opt_base_model.eval()
     opt_model = OPTForCausalLMModel(opt_base_model)
     encoded_inputs = tokenizer(
@@ -83,7 +83,7 @@ def load_shark_model() -> ModelWrapper:
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
     if not os.path.isfile(vmfb_name):
         print(f"vmfb not found. compiling and saving to {vmfb_name}")
-        create_vmfb_module(OPT_MODELNAME, tokenizer, DEVICE)
+        create_vmfb_module(MODEL_NAME, tokenizer, DEVICE)
     shark_module = SharkInference(mlir_module=None, device="cpu-task")
     shark_module.load_module(vmfb_name)
     return ModelWrapper(model=shark_module, tokenizer=tokenizer)
@@ -183,6 +183,26 @@ def collect_shark_logits():
     save_json(results, "/tmp/shark.json")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--save-json',
+                        help='If set, saves output JSON.',
+                        action=argparse.BooleanOptionalAction,
+                        default=False)
+    parser.add_argument('--max-seq-len',
+                        help='Max sequence length',
+                        type=int,
+                        default=32)
+    parser.add_argument('--model-name',
+                        help='Model name',
+                        type=str,
+                        default='facebook/opt-1.3b')
+    args = parser.parse_args()
+    print('args={}'.format(args))
+    return args
+
+
 if __name__ == "__main__":
+    parse_args()
     collect_shark_logits()
     collect_huggingface_logits()
