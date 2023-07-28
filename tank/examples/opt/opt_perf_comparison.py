@@ -220,7 +220,9 @@ if __name__ == "__main__":
     huggingface_times = collect_huggingface_logits(args.model_name,
                                                    args.max_seq_len,
                                                    args.save_json)
-    # shark_load_time,shark_run_time,huggingface_load_time,huggingface_run_time
-    all_times_csv = ','.join(
-        [str(e) for e in list(shark_times) + list(huggingface_times)])
-    print(f'# Summary: {all_times_csv}')
+    # [model_name, max_seq_len, hark_load_time, shark_run_time,
+    #  huggingface_load_time, huggingface_run_time]
+    summary_fields = [args.model_name, args.max_seq_len
+                      ] + list(shark_times) + list(huggingface_times)
+    summary_json = json.dumps(summary_fields)
+    print(f'# Summary: {summary_json}')
