@@ -9,7 +9,6 @@ from shark.shark_importer import import_with_fx
 from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
-MODEL_NAME = "facebook/opt-1.3b"
 MAX_SEQUENCE_LENGTH = 512
 DEVICE = "cpu"
 
@@ -81,10 +80,10 @@ def create_vmfb_module(model_name, tokenizer, device):
 def load_shark_model(model_name) -> ModelWrapper:
     opt_fs_name = get_opt_fs_name(model_name)
     vmfb_name = f"{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels.vmfb"
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     if not os.path.isfile(vmfb_name):
         print(f"vmfb not found. compiling and saving to {vmfb_name}")
-        create_vmfb_module(MODEL_NAME, tokenizer, DEVICE)
+        create_vmfb_module(model_name, tokenizer, DEVICE)
     shark_module = SharkInference(mlir_module=None, device="cpu-task")
     shark_module.load_module(vmfb_name)
     return ModelWrapper(model=shark_module, tokenizer=tokenizer)
@@ -95,10 +94,10 @@ def run_shark_model(model_wrapper: ModelWrapper, tokens):
     return model_wrapper.model("forward", tokens)
 
 
-def load_huggingface_model() -> ModelWrapper:
+def load_huggingface_model(model_name: str) -> ModelWrapper:
     return ModelWrapper(
-        model=OPTForCausalLM.from_pretrained(MODEL_NAME),
-        tokenizer=AutoTokenizer.from_pretrained(MODEL_NAME),
+        model=OPTForCausalLM.from_pretrained(model_name),
+        tokenizer=AutoTokenizer.from_pretrained(model_name),
     )
 
 
@@ -108,22 +107,14 @@ def run_huggingface_model(model_wrapper: ModelWrapper, tokens):
                                        return_dict=False)
 
 
-def run_huggingface():
-    model_wrapper = load_huggingface_model()
-    prompt = "What is the meaning of life?"
-    logits = run_huggingface_model(model_wrapper, prompt)
-
-    print(logits[0])
-
-
 def save_json(data, filename):
     with open(filename, "w") as file:
         json.dump(data, file)
 
 
-def collect_huggingface_logits():
+def collect_huggingface_logits(model_name: str):
     t0 = time.time()
-    model_wrapper = load_huggingface_model()
+    model_wrapper = load_huggingface_model(model_name)
     print("--- Took {} seconds to load Huggingface.".format(time.time() - t0))
     results = []
     tokenized_prompts = []
@@ -207,6 +198,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    parse_args()
-    collect_shark_logits(MODEL_NAME)
-    collect_huggingface_logits()
+    args = parse_args()
+    collect_shark_logits(args.model_name)
+    collect_huggingface_logits(args.model_name)
