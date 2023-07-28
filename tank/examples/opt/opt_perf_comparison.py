@@ -203,6 +203,10 @@ def parse_args():
     parser.add_argument('--model-name',
                         help='Model name',
                         type=str,
+                        choices=[
+                            'facebook/opt-125m', 'facebook/opt-350m',
+                            'facebook/opt-1.3b', 'facebook/opt-6.7b'
+                        ],
                         default='facebook/opt-1.3b')
     args = parser.parse_args()
     print('args={}'.format(args))
