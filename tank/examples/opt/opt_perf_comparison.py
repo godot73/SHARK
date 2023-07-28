@@ -9,7 +9,6 @@ from shark.shark_importer import import_with_fx
 from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
-MAX_SEQUENCE_LENGTH = 512
 DEVICE = "cpu"
 
 PROMPTS = [
@@ -28,7 +27,7 @@ PROMPTS = [
 ModelWrapper = collections.namedtuple("ModelWrapper", ["model", "tokenizer"])
 
 
-def create_vmfb_module(model_name, tokenizer, device):
+def create_vmfb_module(model_name, tokenizer, device, max_seq_len):
     opt_base_model = OPTForCausalLM.from_pretrained(model_name)
     opt_base_model.eval()
     opt_model = OPTForCausalLMModel(opt_base_model)
@@ -36,7 +35,7 @@ def create_vmfb_module(model_name, tokenizer, device):
         "What is the meaning of life?",
         padding="max_length",
         truncation=True,
-        max_length=MAX_SEQUENCE_LENGTH,
+        max_length=max_seq_len,
         return_tensors="pt",
     )
     inputs = (
@@ -47,7 +46,7 @@ def create_vmfb_module(model_name, tokenizer, device):
     # np.save("model_inputs_1.npy", inputs[1])
 
     opt_fs_name = get_opt_fs_name(model_name)
-    mlir_path = f"./{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch.mlir"
+    mlir_path = f"./{opt_fs_name}_causallm_{max_seq_len}_torch.mlir"
     if os.path.isfile(mlir_path):
         with open(mlir_path, "r") as f:
             model_mlir = f.read()
@@ -71,19 +70,19 @@ def create_vmfb_module(model_name, tokenizer, device):
         is_benchmark=False,
     )
 
-    vmfb_name = f"{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels"
+    vmfb_name = f"{opt_fs_name}_causallm_{max_seq_len}_torch_{DEVICE}_tiled_ukernels"
     shark_module.save_module(module_name=vmfb_name)
     vmfb_path = vmfb_name + ".vmfb"
     return vmfb_path
 
 
-def load_shark_model(model_name) -> ModelWrapper:
+def load_shark_model(model_name: str, max_seq_len: int) -> ModelWrapper:
     opt_fs_name = get_opt_fs_name(model_name)
-    vmfb_name = f"{opt_fs_name}_causallm_{MAX_SEQUENCE_LENGTH}_torch_{DEVICE}_tiled_ukernels.vmfb"
+    vmfb_name = f"{opt_fs_name}_causallm_{max_seq_len}_torch_{DEVICE}_tiled_ukernels.vmfb"
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
     if not os.path.isfile(vmfb_name):
         print(f"vmfb not found. compiling and saving to {vmfb_name}")
-        create_vmfb_module(model_name, tokenizer, DEVICE)
+        create_vmfb_module(model_name, tokenizer, DEVICE, max_seq_len)
     shark_module = SharkInference(mlir_module=None, device="cpu-task")
     shark_module.load_module(vmfb_name)
     return ModelWrapper(model=shark_module, tokenizer=tokenizer)
@@ -112,7 +111,8 @@ def save_json(data, filename):
         json.dump(data, file)
 
 
-def collect_huggingface_logits(model_name: str):
+def collect_huggingface_logits(model_name: str, max_seq_len: int,
+                               save_json: bool):
     t0 = time.time()
     model_wrapper = load_huggingface_model(model_name)
     print("--- Took {} seconds to load Huggingface.".format(time.time() - t0))
@@ -122,7 +122,7 @@ def collect_huggingface_logits(model_name: str):
         tokens = model_wrapper.tokenizer(
             prompt,
             padding="max_length",
-            max_length=MAX_SEQUENCE_LENGTH,
+            max_length=max_seq_len,
             truncation=True,
             return_tensors="pt",
         )
@@ -131,14 +131,16 @@ def collect_huggingface_logits(model_name: str):
     for idx, tokens in enumerate(tokenized_prompts):
         print("prompt: {}".format(PROMPTS[idx]))
         logits = run_huggingface_model(model_wrapper, tokens)
-        results.append([PROMPTS[idx], logits[0].tolist()])
+        if save_json:
+            results.append([PROMPTS[idx], logits[0].tolist()])
     print("--- Took {} seconds to run Huggingface.".format(time.time() - t0))
-    save_json(results, "/tmp/huggingface.json")
+    if save_json:
+        save_json(results, "/tmp/huggingface.json")
 
 
-def collect_shark_logits(model_name):
+def collect_shark_logits(model_name: str, max_seq_len: int, save_json: bool):
     t0 = time.time()
-    model_wrapper = load_shark_model(model_name)
+    model_wrapper = load_shark_model(model_name, max_seq_len)
     print("--- Took {} seconds to load Shark.".format(time.time() - t0))
     results = []
     tokenized_prompts = []
@@ -147,7 +149,7 @@ def collect_shark_logits(model_name):
             prompt,
             padding="max_length",
             truncation=True,
-            max_length=MAX_SEQUENCE_LENGTH,
+            max_length=max_seq_len,
             return_tensors="pt",
         )
         inputs = (
@@ -160,9 +162,11 @@ def collect_shark_logits(model_name):
         print("prompt: {}".format(PROMPTS[idx]))
         logits = run_shark_model(model_wrapper, tokens)
         lst = [e.tolist() for e in logits]
-        results.append([PROMPTS[idx], lst])
+        if save_json:
+            results.append([PROMPTS[idx], lst])
     print("--- Took {} seconds to run Shark.".format(time.time() - t0))
-    save_json(results, "/tmp/shark.json")
+    if save_json:
+        save_json(results, "/tmp/shark.json")
 
 
 def get_opt_fs_name(model_name: str) -> str:
@@ -199,5 +203,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    collect_shark_logits(args.model_name)
-    collect_huggingface_logits(args.model_name)
+    collect_shark_logits(args.model_name, args.max_seq_len, args.save_json)
+    collect_huggingface_logits(args.model_name, args.max_seq_len,
+                               args.save_json)
