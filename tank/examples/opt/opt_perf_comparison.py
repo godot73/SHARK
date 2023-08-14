@@ -1,9 +1,10 @@
 import argparse
 import collections
 import json
+import os
+import resource
 import time
 from typing import Tuple
-import os
 
 from shark.shark_inference import SharkInference
 from shark.shark_importer import import_with_fx
@@ -11,6 +12,17 @@ from transformers import AutoTokenizer, OPTForCausalLM
 from shark_opt_wrapper import OPTForCausalLMModel
 
 DEVICE = "cpu"
+PLATFORM_SHARK = "shark"
+PLATFORM_HUGGINGFACE = "huggingface"
+
+# Dict keys for reports.
+REPORT_PLATFORM = "platform"
+REPORT_LOAD_TIME = "load_time_sec"
+REPORT_RUN_TIME = "run_time_sec"
+REPORT_LOAD_MAXRSS = "load_maxrss_kb"
+REPORT_RUN_MAXRSS = "run_maxrss_kb"
+
+SLEEP_SECONDS = 3
 
 PROMPTS = [
     "What is the meaning of life?",
@@ -28,12 +40,18 @@ PROMPTS = [
 ModelWrapper = collections.namedtuple("ModelWrapper", ["model", "tokenizer"])
 
 
-def create_vmfb_module(model_name, tokenizer, device, max_seq_len):
+def get_maxrss() -> int:
+    time.sleep(SLEEP_SECONDS)
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+
+def create_vmfb_module(model_name: str, tokenizer, device: str,
+                       max_seq_len: int, recompile_shark: bool):
     opt_base_model = OPTForCausalLM.from_pretrained(model_name)
     opt_base_model.eval()
     opt_model = OPTForCausalLMModel(opt_base_model)
     encoded_inputs = tokenizer(
-        "What is the meaning of life?",
+        PROMPTS[0],
         padding="max_length",
         truncation=True,
         max_length=max_seq_len,
@@ -48,7 +66,14 @@ def create_vmfb_module(model_name, tokenizer, device, max_seq_len):
 
     opt_fs_name = get_opt_fs_name(model_name)
     mlir_path = f"./{opt_fs_name}_causallm_{max_seq_len}_torch.mlir"
-    if os.path.isfile(mlir_path):
+    # If MLIR has already been loaded and recompilation is not requested, use
+    # the loaded MLIR file.
+    has_mlir = os.path.isfile(mlir_path)
+    # The purpose of recompile_shark is to measure compilation time; the
+    # compilation time can be correctly measured only when MLIR has already been
+    # loaded.
+    assert not recompile_shark or has_mlir
+    if has_mlir:
         with open(mlir_path, "r") as f:
             model_mlir = f.read()
         print(f"Loaded .mlir from {mlir_path}")
@@ -77,13 +102,15 @@ def create_vmfb_module(model_name, tokenizer, device, max_seq_len):
     return vmfb_path
 
 
-def load_shark_model(model_name: str, max_seq_len: int) -> ModelWrapper:
+def load_shark_model(model_name: str, max_seq_len: int,
+                     recompile_shark: bool) -> ModelWrapper:
     opt_fs_name = get_opt_fs_name(model_name)
     vmfb_name = f"{opt_fs_name}_causallm_{max_seq_len}_torch_{DEVICE}_tiled_ukernels.vmfb"
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
-    if not os.path.isfile(vmfb_name):
+    if recompile_shark or not os.path.isfile(vmfb_name):
         print(f"vmfb not found. compiling and saving to {vmfb_name}")
-        create_vmfb_module(model_name, tokenizer, DEVICE, max_seq_len)
+        create_vmfb_module(model_name, tokenizer, DEVICE, max_seq_len,
+                           recompile_shark)
     shark_module = SharkInference(mlir_module=None, device="cpu-task")
     shark_module.load_module(vmfb_name)
     return ModelWrapper(model=shark_module, tokenizer=tokenizer)
@@ -114,10 +141,14 @@ def save_json(data, filename):
 
 def collect_huggingface_logits(model_name: str, max_seq_len: int,
                                save_json: bool) -> Tuple[float, float]:
+    # Load
+    maxrss0 = get_maxrss()
     t0 = time.time()
     model_wrapper = load_huggingface_model(model_name)
     load_time = time.time() - t0
     print("--- Took {} seconds to load Huggingface.".format(load_time))
+    load_maxrss = get_maxrss()
+
     results = []
     tokenized_prompts = []
     for prompt in PROMPTS:
@@ -129,6 +160,8 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
             return_tensors="pt",
         )
         tokenized_prompts.append(tokens)
+
+    # Run
     t0 = time.time()
     for idx, tokens in enumerate(tokenized_prompts):
         print("prompt: {}".format(PROMPTS[idx]))
@@ -139,15 +172,26 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
     print("--- Took {} seconds to run Huggingface.".format(run_time))
     if save_json:
         save_json(results, "/tmp/huggingface.json")
-    return (load_time, run_time)
+    return {
+        REPORT_PLATFORM: PLATFORM_HUGGINGFACE,
+        REPORT_LOAD_TIME: load_time,
+        REPORT_RUN_TIME: run_time / len(PROMPTS),
+        REPORT_LOAD_MAXRSS: load_maxrss - maxrss0,
+        REPORT_RUN_MAXRSS: get_maxrss() - maxrss0,
+    }
 
 
 def collect_shark_logits(model_name: str, max_seq_len: int,
+                         recompile_shark: bool,
                          save_json: bool) -> Tuple[float, float]:
+    # Load
+    maxrss0 = get_maxrss()
     t0 = time.time()
-    model_wrapper = load_shark_model(model_name, max_seq_len)
+    model_wrapper = load_shark_model(model_name, max_seq_len, recompile_shark)
     load_time = time.time() - t0
     print("--- Took {} seconds to load Shark.".format(load_time))
+    load_maxrss = get_maxrss()
+
     results = []
     tokenized_prompts = []
     for prompt in PROMPTS:
@@ -163,6 +207,8 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
             tokens["attention_mask"],
         )
         tokenized_prompts.append(inputs)
+
+    # Run
     t0 = time.time()
     for idx, tokens in enumerate(tokenized_prompts):
         print("prompt: {}".format(PROMPTS[idx]))
@@ -174,7 +220,14 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
     print("--- Took {} seconds to run Shark.".format(run_time))
     if save_json:
         save_json(results, "/tmp/shark.json")
-    return (load_time, run_time)
+    platform_postfix = '-compile' if recompile_shark else '-precompiled'
+    return {
+        REPORT_PLATFORM: PLATFORM_SHARK + platform_postfix,
+        REPORT_LOAD_TIME: load_time,
+        REPORT_RUN_TIME: run_time / len(PROMPTS),
+        REPORT_LOAD_MAXRSS: load_maxrss - maxrss0,
+        REPORT_RUN_MAXRSS: get_maxrss() - maxrss0,
+    }
 
 
 def get_opt_fs_name(model_name: str) -> str:
@@ -208,6 +261,15 @@ def parse_args():
                             'facebook/opt-1.3b', 'facebook/opt-6.7b'
                         ],
                         default='facebook/opt-1.3b')
+    parser.add_argument('--recompile-shark',
+                        help='If set, recompiles MLIR',
+                        action=argparse.BooleanOptionalAction,
+                        default=False)
+    parser.add_argument('--platform',
+                        help='Either shark or huggingface',
+                        type=str,
+                        choices=[PLATFORM_SHARK, PLATFORM_HUGGINGFACE],
+                        default=PLATFORM_SHARK)
     args = parser.parse_args()
     print('args={}'.format(args))
     return args
@@ -215,14 +277,12 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    shark_times = collect_shark_logits(args.model_name, args.max_seq_len,
-                                       args.save_json)
-    huggingface_times = collect_huggingface_logits(args.model_name,
-                                                   args.max_seq_len,
-                                                   args.save_json)
-    # [model_name, max_seq_len, hark_load_time, shark_run_time,
-    #  huggingface_load_time, huggingface_run_time]
-    summary_fields = [args.model_name, args.max_seq_len
-                      ] + list(shark_times) + list(huggingface_times)
-    summary_json = json.dumps(summary_fields)
-    print(f'# Summary: {summary_json}')
+    if args.platform == PLATFORM_SHARK:
+        shark_report = collect_shark_logits(args.model_name, args.max_seq_len,
+                                            args.recompile_shark, args.save_json)
+        print('# Summary: {}'.format(json.dumps(shark_report)))
+    else:
+        huggingface_report = collect_huggingface_logits(args.model_name,
+                                                        args.max_seq_len,
+                                                        args.save_json)
+        print('# Summary: {}'.format(json.dumps(huggingface_report)))
