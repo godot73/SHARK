@@ -87,7 +87,7 @@ from langchain.document_loaders import (
     UnstructuredExcelLoader,
 )
 from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
-from langchain.chains.question_answering import load_qa_chain
+from expanded_pipelines import load_qa_chain
 from langchain.docstore.document import Document
 from langchain import PromptTemplate, HuggingFaceTextGenInference
 from langchain.vectorstores import Chroma
@@ -436,7 +436,7 @@ class GradioInference(LLM):
     chat_client: bool = False
 
     return_full_text: bool = True
-    stream: bool = False
+    stream_output: bool = Field(False, alias="stream")
     sanitize_bot_response: bool = False
 
     prompter: Any = None
@@ -481,7 +481,7 @@ class GradioInference(LLM):
         # so server should get prompt_type or '', not plain
         # This is good, so gradio server can also handle stopping.py conditions
         # this is different than TGI server that uses prompter to inject prompt_type prompting
-        stream_output = self.stream
+        stream_output = self.stream_output
         gr_client = self.client
         client_langchain_mode = "Disabled"
         client_langchain_action = LangChainAction.QUERY.value
@@ -596,7 +596,7 @@ class H2OHuggingFaceTextGenInference(HuggingFaceTextGenInference):
     inference_server_url: str = ""
     timeout: int = 300
     headers: dict = None
-    stream: bool = False
+    stream_output: bool = Field(False, alias="stream")
     sanitize_bot_response: bool = False
     prompter: Any = None
     tokenizer: Any = None
@@ -663,7 +663,7 @@ class H2OHuggingFaceTextGenInference(HuggingFaceTextGenInference):
         # lower bound because client is re-used if multi-threading
         self.client.timeout = max(300, self.timeout)
 
-        if not self.stream:
+        if not self.stream_output:
             res = self.client.generate(
                 prompt,
                 **gen_server_kwargs,
@@ -852,7 +852,7 @@ def get_llm(
                 top_p=top_p,
                 # typical_p=top_p,
                 callbacks=callbacks if stream_output else None,
-                stream=stream_output,
+                stream_output=stream_output,
                 prompter=prompter,
                 tokenizer=tokenizer,
                 client=hf_client,
@@ -2510,8 +2510,7 @@ def _run_qa_db(
         formatted_doc_chunks = "\n\n".join(
             [get_url(x) + "\n\n" + x.page_content for x in docs]
         )
-        yield formatted_doc_chunks, ""
-        return
+        return formatted_doc_chunks, ""
     if not docs and langchain_action in [
         LangChainAction.SUMMARIZE_MAP.value,
         LangChainAction.SUMMARIZE_ALL.value,
@@ -2523,8 +2522,7 @@ def _run_qa_db(
             else "No documents to summarize."
         )
         extra = ""
-        yield ret, extra
-        return
+        return ret, extra
     if not docs and langchain_mode not in [
         LangChainMode.DISABLED.value,
         LangChainMode.CHAT_LLM.value,
@@ -2536,8 +2534,7 @@ def _run_qa_db(
             else "No documents to query."
         )
         extra = ""
-        yield ret, extra
-        return
+        return ret, extra
 
     if chain is None and model_name not in non_hf_types:
         # here if no docs at all and not HF type
@@ -2557,22 +2554,7 @@ def _run_qa_db(
         )
         with context_class_cast(args.device):
             answer = chain()
-
-    if not use_context:
-        ret = answer["output_text"]
-        extra = ""
-        yield ret, extra
-    elif answer is not None:
-        ret, extra = get_sources_answer(
-            query,
-            answer,
-            scores,
-            show_rank,
-            answer_with_sources,
-            verbose=verbose,
-        )
-        yield ret, extra
-    return
+            return answer
 
 
 def get_similarity_chain(
@@ -2958,56 +2940,8 @@ def get_similarity_chain(
                 template=template,
             )
             chain = load_qa_chain(llm, prompt=prompt)
-        else:
-            # only if use_openai_model = True, unused normally except in testing
-            chain = load_qa_with_sources_chain(llm)
-        if not use_context:
-            chain_kwargs = dict(input_documents=[], question=query)
-        else:
-            chain_kwargs = dict(input_documents=docs, question=query)
+        chain_kwargs = dict(input_documents=docs, question=query)
         target = wrapped_partial(chain, chain_kwargs)
-    elif langchain_action in [
-        LangChainAction.SUMMARIZE_MAP.value,
-        LangChainAction.SUMMARIZE_REFINE,
-        LangChainAction.SUMMARIZE_ALL.value,
-    ]:
-        from langchain.chains.summarize import load_summarize_chain
-
-        if langchain_action == LangChainAction.SUMMARIZE_MAP.value:
-            prompt = PromptTemplate(
-                input_variables=["text"], template=template
-            )
-            chain = load_summarize_chain(
-                llm,
-                chain_type="map_reduce",
-                map_prompt=prompt,
-                combine_prompt=prompt,
-                return_intermediate_steps=True,
-            )
-            target = wrapped_partial(
-                chain, {"input_documents": docs}
-            )  # , return_only_outputs=True)
-        elif langchain_action == LangChainAction.SUMMARIZE_ALL.value:
-            assert use_template
-            prompt = PromptTemplate(
-                input_variables=["text"], template=template
-            )
-            chain = load_summarize_chain(
-                llm,
-                chain_type="stuff",
-                prompt=prompt,
-                return_intermediate_steps=True,
-            )
-            target = wrapped_partial(chain)
-        elif langchain_action == LangChainAction.SUMMARIZE_REFINE.value:
-            chain = load_summarize_chain(
-                llm, chain_type="refine", return_intermediate_steps=True
-            )
-            target = wrapped_partial(chain)
-        else:
-            raise RuntimeError(
-                "No such langchain_action=%s" % langchain_action
-            )
     else:
         raise RuntimeError("No such langchain_action=%s" % langchain_action)
 

@@ -30,6 +30,7 @@ datas += copy_metadata("safetensors")
 datas += copy_metadata("Pillow")
 datas += copy_metadata("sentencepiece")
 datas += copy_metadata("pyyaml")
+datas += copy_metadata("huggingface-hub")
 datas += collect_data_files("tokenizers")
 datas += collect_data_files("tiktoken")
 datas += collect_data_files("accelerate")
@@ -42,7 +43,7 @@ datas += collect_data_files("gradio")
 datas += collect_data_files("gradio_client")
 datas += collect_data_files("iree")
 datas += collect_data_files("google_cloud_storage")
-datas += collect_data_files("shark")
+datas += collect_data_files("shark", include_py_files=True)
 datas += collect_data_files("timm", include_py_files=True)
 datas += collect_data_files("tkinter")
 datas += collect_data_files("webview")
@@ -50,6 +51,7 @@ datas += collect_data_files("sentencepiece")
 datas += collect_data_files("jsonschema")
 datas += collect_data_files("jsonschema_specifications")
 datas += collect_data_files("cpuinfo")
+datas += collect_data_files("langchain")
 datas += [
     ("src/utils/resources/prompts.json", "resources"),
     ("src/utils/resources/model_db.json", "resources"),
@@ -75,3 +77,4 @@ hiddenimports += [
     x for x in collect_submodules("transformers") if "tests" not in x
 ]
 hiddenimports += [x for x in collect_submodules("iree") if "tests" not in x]
+hiddenimports += ["iree._runtime", "iree._runtime_libs"]
