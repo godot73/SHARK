@@ -18,6 +18,8 @@ PLATFORM_HUGGINGFACE = "huggingface"
 
 # Dict keys for reports.
 REPORT_PLATFORM = "platform"
+REPORT_MODEL_NAME = "model"
+REPORT_MAX_SEQ_LEN = "max_seq_len"
 REPORT_LOAD_TIME = "load_time_sec"
 REPORT_RUN_TIME = "run_time_sec"
 REPORT_LOAD_PHYSICAL_MEMORY_MB = "load_physical_MB"
@@ -176,6 +178,8 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
     run_memory_info = get_memory_info()
     return {
         REPORT_PLATFORM: PLATFORM_HUGGINGFACE,
+        REPORT_MODEL_NAME: model_name,
+        REPORT_MAX_SEQ_LEN: max_seq_len,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
         REPORT_LOAD_PHYSICAL_MEMORY_MB: load_memory_info.rss >> 20,
@@ -227,6 +231,8 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
     run_memory_info = get_memory_info()
     return {
         REPORT_PLATFORM: PLATFORM_SHARK + platform_postfix,
+        REPORT_MODEL_NAME: model_name,
+        REPORT_MAX_SEQ_LEN: max_seq_len,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
         REPORT_LOAD_PHYSICAL_MEMORY_MB: load_memory_info.rss >> 20,
