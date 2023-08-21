@@ -142,7 +142,6 @@ def save_json(data, filename):
 def collect_huggingface_logits(model_name: str, max_seq_len: int,
                                save_json: bool) -> Tuple[float, float]:
     # Load
-    maxrss0 = get_maxrss()
     t0 = time.time()
     model_wrapper = load_huggingface_model(model_name)
     load_time = time.time() - t0
@@ -176,8 +175,8 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
         REPORT_PLATFORM: PLATFORM_HUGGINGFACE,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
-        REPORT_LOAD_MAXRSS: load_maxrss - maxrss0,
-        REPORT_RUN_MAXRSS: get_maxrss() - maxrss0,
+        REPORT_LOAD_MAXRSS: load_maxrss,
+        REPORT_RUN_MAXRSS: get_maxrss(),
     }
 
 
@@ -185,7 +184,6 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
                          recompile_shark: bool,
                          save_json: bool) -> Tuple[float, float]:
     # Load
-    maxrss0 = get_maxrss()
     t0 = time.time()
     model_wrapper = load_shark_model(model_name, max_seq_len, recompile_shark)
     load_time = time.time() - t0
@@ -225,8 +223,8 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
         REPORT_PLATFORM: PLATFORM_SHARK + platform_postfix,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
-        REPORT_LOAD_MAXRSS: load_maxrss - maxrss0,
-        REPORT_RUN_MAXRSS: get_maxrss() - maxrss0,
+        REPORT_LOAD_MAXRSS: load_maxrss,
+        REPORT_RUN_MAXRSS: get_maxrss(),
     }
 
 
