@@ -2,6 +2,7 @@ import argparse
 import collections
 import json
 import os
+import psutil
 import resource
 import time
 from typing import Tuple
@@ -19,10 +20,10 @@ PLATFORM_HUGGINGFACE = "huggingface"
 REPORT_PLATFORM = "platform"
 REPORT_LOAD_TIME = "load_time_sec"
 REPORT_RUN_TIME = "run_time_sec"
-REPORT_LOAD_MAXRSS = "load_maxrss_kb"
-REPORT_RUN_MAXRSS = "run_maxrss_kb"
-
-SLEEP_SECONDS = 3
+REPORT_LOAD_PHYSICAL_MEMORY_MB = "load_physical_MB"
+REPORT_LOAD_VIRTUAL_MEMORY_MB = "load_virtual_MB"
+REPORT_RUN_PHYSICAL_MEMORY_MB = "run_physical_MB"
+REPORT_RUN_VIRTUAL_MEMORY_MB = "run_virtual_MB"
 
 PROMPTS = [
     "What is the meaning of life?",
@@ -40,9 +41,10 @@ PROMPTS = [
 ModelWrapper = collections.namedtuple("ModelWrapper", ["model", "tokenizer"])
 
 
-def get_maxrss() -> int:
-    time.sleep(SLEEP_SECONDS)
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+def get_memory_info():
+    pid = os.getpid()
+    process = psutil.Process(pid)
+    return process.memory_info()
 
 
 def create_vmfb_module(model_name: str, tokenizer, device: str,
@@ -146,7 +148,7 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
     model_wrapper = load_huggingface_model(model_name)
     load_time = time.time() - t0
     print("--- Took {} seconds to load Huggingface.".format(load_time))
-    load_maxrss = get_maxrss()
+    load_memory_info = get_memory_info()
 
     results = []
     tokenized_prompts = []
@@ -171,12 +173,15 @@ def collect_huggingface_logits(model_name: str, max_seq_len: int,
     print("--- Took {} seconds to run Huggingface.".format(run_time))
     if save_json:
         save_json(results, "/tmp/huggingface.json")
+    run_memory_info = get_memory_info()
     return {
         REPORT_PLATFORM: PLATFORM_HUGGINGFACE,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
-        REPORT_LOAD_MAXRSS: load_maxrss,
-        REPORT_RUN_MAXRSS: get_maxrss(),
+        REPORT_LOAD_PHYSICAL_MEMORY_MB: load_memory_info.rss >> 20,
+        REPORT_LOAD_VIRTUAL_MEMORY_MB: load_memory_info.vms >> 20,
+        REPORT_RUN_PHYSICAL_MEMORY_MB: run_memory_info.rss >> 20,
+        REPORT_RUN_VIRTUAL_MEMORY_MB: run_memory_info.vms >> 20,
     }
 
 
@@ -188,7 +193,7 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
     model_wrapper = load_shark_model(model_name, max_seq_len, recompile_shark)
     load_time = time.time() - t0
     print("--- Took {} seconds to load Shark.".format(load_time))
-    load_maxrss = get_maxrss()
+    load_memory_info = get_memory_info()
 
     results = []
     tokenized_prompts = []
@@ -219,12 +224,15 @@ def collect_shark_logits(model_name: str, max_seq_len: int,
     if save_json:
         save_json(results, "/tmp/shark.json")
     platform_postfix = '-compile' if recompile_shark else '-precompiled'
+    run_memory_info = get_memory_info()
     return {
         REPORT_PLATFORM: PLATFORM_SHARK + platform_postfix,
         REPORT_LOAD_TIME: load_time,
         REPORT_RUN_TIME: run_time / len(PROMPTS),
-        REPORT_LOAD_MAXRSS: load_maxrss,
-        REPORT_RUN_MAXRSS: get_maxrss(),
+        REPORT_LOAD_PHYSICAL_MEMORY_MB: load_memory_info.rss >> 20,
+        REPORT_LOAD_VIRTUAL_MEMORY_MB: load_memory_info.vms >> 20,
+        REPORT_RUN_PHYSICAL_MEMORY_MB: run_memory_info.rss >> 20,
+        REPORT_RUN_VIRTUAL_MEMORY_MB: run_memory_info.vms >> 20,
     }
 
 
