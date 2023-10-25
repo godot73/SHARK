@@ -20,6 +20,7 @@ def parse_args():
             "facebook/opt-350m",
             "facebook/opt-1.3b",
             "facebook/opt-6.7b",
+            "mit-han-lab/opt-125m-smoothquant",
         ],
         default="facebook/opt-1.3b",
     )
