@@ -25,6 +25,18 @@ def parse_args():
         default="facebook/opt-1.3b",
     )
     parser.add_argument(
+        "--tokenizer-name",
+        help="Model name",
+        type=str,
+        choices=[
+            "facebook/opt-125m",
+            "facebook/opt-350m",
+            "facebook/opt-1.3b",
+            "facebook/opt-6.7b",
+        ],
+        default=None,
+    )
+    parser.add_argument(
         "--recompile",
         help="If set, recompiles MLIR -> .vmfb",
         action=argparse.BooleanOptionalAction,
@@ -43,7 +55,11 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=False)
+    if args.tokenizer_name is None:
+        args.tokenizer_name = args.model_name
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.tokenizer_name, use_fast=False
+    )
     opt_fs_name = "-".join(
         "_".join(args.model_name.split("/")[1].split("-")).split(".")
     )
